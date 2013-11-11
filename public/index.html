@@ -1,0 +1,223 @@
+<!doctype html>
+<head>
+  <meta charset="utf-8">
+
+  <title>Hackathon Raffle</title>
+  <meta name="description" content="My Parse App"> 
+  <meta name="viewport" content="width=device-width">
+  <link rel="stylesheet" href="css/reset.css">
+  <link rel="stylesheet" href="css/styles.css"> 
+  <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+  <script type="text/javascript" src="http://www.parsecdn.com/js/parse-1.2.12.min.js"></script>
+  <script type="text/javascript" src="https://connect.facebook.net/en_US/all.js"></script>
+</head>
+
+<body>
+  
+  <div id="main">
+    <button id="back" onclick="event_list()" style="display:none">BACK</button>
+    <h1>Hackathon Raffle Tool!</h1>
+
+    <p id="header">Select the event you're attending:</p>
+
+    <ul id="hacklist">
+    </ul>
+
+    <div style="display:none" class="error">
+      Looks like there was a problem :(
+    </div>
+
+    <button id="inform" onclick="inform_winner()" style="display:none">Inform Event</button>
+    <button id="reload" onclick="reload_from_fb()" style="display:none">RESET WINNER LIST</button>
+    <button id="newwinner" onclick="select_winner()" style="display:none">New Winner</button>
+    
+  </div>
+
+
+  <div id="fb-root"></div>
+
+
+  <script type="text/javascript">
+    function event_list() {
+      $("#reload").hide();
+      $("#newwinner").hide();
+      $("#inform").hide();
+      $("#back").hide();
+      $("#hacklist").show();
+      $("#header").text("Select the event you're attending:");
+    }
+
+    function got_the_fb_user() {
+      FB.api('/me/events?type=attending', function(response) {
+        console.log(response);
+        got_the_user_events(response.data);
+      });
+    }
+
+    function got_the_user_events(events) {
+      for (var i = events.length - 1; i >= 0; i--) {
+        var item = document.createElement("li");
+        var link = document.createElement("a");
+        var text = document.createTextNode(events[i].name);
+        link.href = "javascript:goto_event(" + events[i].id + ")";
+        link.appendChild(text);
+        item.appendChild(link);
+        $("#hacklist").append(item);
+      };
+    }
+
+
+    function goto_event(fbeventid) {
+      global_fbeventid = fbeventid;
+      console.log("goto event");
+      $("#hacklist").hide();
+      $("#header").text("Loading the attendees...");
+      var guestlist = new FBGuestList();
+      var query = new Parse.Query(FBAttendee);
+      query.equalTo("event_fbid", fbeventid);
+      guestlist = query.collection();
+      guestlist.fetch({
+        success: function(result) {
+          global_guestlist = result;
+          if (result.size()) {
+            console.log("from parse got " + result.size());
+            reset_winner_view();
+            select_winner();
+          } else {
+            console.log("failed get from parse");
+            reload_from_fb();
+          }
+        },
+        error: function(collection, error) {
+          console.log(":( didn't connect to parse");
+        }
+      });
+      /**/
+    }
+
+    function reload_from_fb(){ 
+      FB.api("/" + global_fbeventid + "/attending", function(response) {
+         add_to_event(response.data, global_fbeventid);
+         var after =  response.paging.cursors.after;
+         get_more_event(global_fbeventid, after);
+      })
+    }
+
+    function add_to_event(attendees, fbeventid) {
+      for (var i = attendees.length - 1; i >= 0; i--) {
+        var a = new FBAttendee();
+        a.set("fbid", attendees[i].id);
+        a.set("event_fbid", fbeventid);
+        a.set("name", attendees[i].name);
+        a.save();
+      };
+      got_all_attendees();
+    }
+
+    function get_more_event(fbeventid, after) {
+      console.log("getting next page from FB");
+      if (after) {
+        console.log("another");
+        FB.api("/" + fbeventid + "/attending?after=" + after,
+          function(response) {
+            console.log("got another response");
+            add_to_event(response.data, fbeventid);
+            var nextafter =  response.paging.cursors.after;
+            get_more_event(fbeventid, nextafter);
+        });
+      } else {
+        got_all_attendees();
+      }
+    }
+
+    function got_all_attendees() {
+      console.log("got all for " + global_fbeventid);
+      var guestlist = new FBGuestList();
+      var query = new Parse.Query(FBAttendee);
+      query.equalTo("event_fbid", global_fbeventid);
+      guestlist = query.collection();
+      guestlist.fetch({
+        success: function(result) {
+          global_guestlist = result;
+          reset_winner_view();
+          select_winner();
+        },
+        error: function(a,b) {
+          console.log(":( failed to connect to parse");
+        }
+      });
+    }
+
+    function reset_winner_view() {
+      $("#reload").show();
+      $("#newwinner").show();
+      $("#inform").show();
+      $("#back").show();
+      $("#header").text("And the winner is...");
+    }
+
+    function select_winner() {
+      global_guestlist.comparator = function(object) {
+        return Math.random();
+      };
+      global_guestlist.sort();
+      var winner = global_guestlist.first();
+      global_winner_name = winner.get("name");
+      $("#header").text("And the winner is: " + winner.get("name") + " (" + winner.get("fbid") + ")");
+      winner.destroy();
+    }
+
+    function inform_winner() {
+      var post = "Congrats to " + global_winner_name + " on winning the raffle! Come up to collect your prize!";
+      FB.api("/" + global_fbeventid + "/feed", "post", {message: post},
+        function (response) {
+          if (!response || response.error) {
+            alert('Error occured posting to event :(');
+          } else {
+            alert('Successfully posted to the group!');
+          }
+      });
+    }
+
+
+
+    // MAIN FUNCTION 
+
+    Parse.initialize("3y6lwrHfakOsvwBbjTv5xbzfIuEjF5bHSoSB0s6s", "1l72IntAwKxA33TzQyJQwkmubBWFxx7BFEPF0ZX7");
+    var FBAttendee = Parse.Object.extend("FBAttendee");
+    var FBGuestList = Parse.Collection.extend({
+      model: FBAttendee
+    });
+    var global_guestlist = new FBGuestList();
+    var global_winner_name = "NOBODY";
+    var global_fbeventid = 0;
+    /*
+    var TestObject = Parse.Object.extend("TestObject");
+    var testObject = new TestObject();
+      testObject.save({foo: "bar"}, {
+      success: function(object) {
+        $(".success").show();
+      },
+      error: function(model, error) {
+        $(".error").show();
+      }
+    }); */
+    
+    FB.init({
+      appId: '632112456840829',
+      channelUrl: 'hackraffle.parseapp.com',
+    });
+
+    FB.login(function(response) {
+      if (response.authResponse) {
+        console.log('Welcome!  Fetching your information.... ');
+        got_the_fb_user();
+      } else {
+        console.log('User cancelled login or did not fully authorize.');
+        $(".error").show();
+      }
+    }, {"scope": "publish_actions,user_events"});
+  </script>
+</body>
+
+</html>
